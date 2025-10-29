@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2025-present MongoDB, Inc.
+ *    Copyright (C) 2023-present MongoDB, Inc.
  *
  *    This program is free software: you can redistribute it and/or modify
  *    it under the terms of the Server Side Public License, version 1,
@@ -26,28 +26,32 @@
  *    exception statement from all source files in the program, then also delete
  *    it in the license file.
  */
-#include "mongo/db/extension/host/host_portal.h"
+#pragma once
 
-#include "mongo/db/extension/host/document_source_extension.h"
-#include "mongo/db/extension/shared/extension_status.h"
-#include "mongo/db/extension/shared/handle/aggregation_stage/stage_descriptor.h"
+#include <clang-tidy/ClangTidy.h>
+#include <clang-tidy/ClangTidyCheck.h>
 
-namespace mongo::extension::host {
+namespace mongo::tidy {
 
-void HostPortal::registerStageDescriptor(const ::MongoExtensionAggStageDescriptor* descriptor) {
-    tassert(
-        10596400, "Got null stage descriptor during extension registration", descriptor != nullptr);
-    DocumentSourceExtension::registerStage(AggStageDescriptorHandle(descriptor));
-}
+/**
+    Overrides the default PPCallback class to primarily override
+    the InclusionDirective call which is called for each include included. This
+    allows the chance to evaluate specifically the include and determine whether
+    it is considered a "mongo" include or not and if it is using the appropriate include style.
+*/
+class MongoHeaderIncludePathCheck : public clang::tidy::ClangTidyCheck {
+public:
+    MongoHeaderIncludePathCheck(clang::StringRef Name, clang::tidy::ClangTidyContext* Context);
+    void storeOptions(clang::tidy::ClangTidyOptions::OptionMap& Opts) override;
+    void registerPPCallbacks(const clang::SourceManager& SM,
+                             clang::Preprocessor* PP,
+                             clang::Preprocessor* ModuleExpanderPP) override;
+    // used to store option `mongoSourceDirs`; supports both absolute and relative paths
+    std::vector<llvm::StringRef> mongoSourceDirs;
 
-::MongoExtensionStatus* HostPortal::_extRegisterStageDescriptor(
-    const MongoExtensionAggStageDescriptor* stageDesc) noexcept {
-    return wrapCXXAndConvertExceptionToStatus([&]() { return registerStageDescriptor(stageDesc); });
-}
+    // The path component that denotes the repo's root source directory (default: "src").
+    // Used to compute canonical include paths "from src/".
+    std::string srcRootComponent;
+};
 
-::MongoExtensionByteView HostPortal::_extGetOptions(
-    const ::MongoExtensionHostPortal* portal) noexcept {
-    return stringViewAsByteView(static_cast<const HostPortal*>(portal)->_extensionOpts);
-}
-
-}  // namespace mongo::extension::host
+}  // namespace mongo::tidy

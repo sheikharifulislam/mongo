@@ -26,54 +26,49 @@
  *    exception statement from all source files in the program, then also delete
  *    it in the license file.
  */
+#pragma once
 
-#include "mongo/db/query/compiler/metadata/arrayness_trie.h"
+#include "mongo/db/extension/public/api.h"
+#include "mongo/util/modules.h"
 
-using namespace mongo::multikey_paths;
+#include <memory>
+#include <string>
 
-namespace mongo {
+namespace mongo::extension::host_connector {
 
-void PathArrayness::addPath(FieldPath path, MultikeyComponents multikeyPath) {
-    _root.insertPath(path, multikeyPath, 0);
-}
+class HostPortalBase {
+public:
+    virtual ~HostPortalBase() = default;
+    virtual void registerStageDescriptor(const ::MongoExtensionAggStageDescriptor*) const = 0;
+};
 
-bool PathArrayness::isPathArray(FieldPath path) const {
-    return true;
-}
+class HostPortalAdapter final : public ::MongoExtensionHostPortal {
+public:
+    HostPortalAdapter(::MongoExtensionAPIVersion apiVersion,
+                      int maxWireVersion,
+                      std::string extensionOptions,
+                      std::unique_ptr<HostPortalBase> portal)
+        : ::MongoExtensionHostPortal{&VTABLE, apiVersion, maxWireVersion},
+          _extensionOpts(std::move(extensionOptions)),
+          _portal(std::move(portal)) {}
 
-void PathArrayness::TrieNode::visualizeTrie(std::string fieldName, int depth) const {
-    for (int i = 0; i < depth; ++i) {
-        std::cout << "  ";
+    const HostPortalBase& getImpl() const {
+        return *_portal;
     }
 
-    std::cout << fieldName << "(" << _isArray << ")" << std::endl;
+private:
+    static ::MongoExtensionStatus* _extRegisterStageDescriptor(
+        const MongoExtensionHostPortal* hostPortal,
+        const MongoExtensionAggStageDescriptor* stageDesc) noexcept;
 
-    // Recursively print children
-    for (auto it = _children.begin(); it != _children.end(); ++it) {
-        it->second.visualizeTrie(it->first, depth + 1);
-    }
-}
+    static ::MongoExtensionByteView _extGetOptions(
+        const ::MongoExtensionHostPortal* portal) noexcept;
 
-void PathArrayness::TrieNode::insertPath(const FieldPath& path,
-                                         const MultikeyComponents& multikeyPath,
-                                         size_t depth) {
-    if (depth >= path.getPathLength()) {
-        return;
-    }
+    static constexpr ::MongoExtensionHostPortalVTable VTABLE{&_extRegisterStageDescriptor,
+                                                             &_extGetOptions};
 
-    // Insert the top level field.
-    std::string fieldNameToInsert = std::string(path.getFieldName(depth));
-    if (!_children.contains(fieldNameToInsert)) {
-        _children.insert({fieldNameToInsert, TrieNode(multikeyPath.count(depth))});
-    }
+    const std::string _extensionOpts;
+    std::unique_ptr<HostPortalBase> _portal;
+};
 
-    // Recursively invoke the remaining path.
-    _children.at(fieldNameToInsert).insertPath(path, multikeyPath, ++depth);
-}
-
-PathArrayness build(std::vector<IndexEntry> entries) {
-    PathArrayness root;
-    return root;
-}
-
-}  // namespace mongo
+}  // namespace mongo::extension::host_connector
